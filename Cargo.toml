@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 port_server={ path="../../port_server" }
-limit_order_book={ path = "../limit_order_book"}
+limit_order_book={ path = "../limit-order-book"}
 crossbeam-channel = "0.5.14"
 threadpool = "1.8.1"
 tokio={ version="1.43.0", features = ["full"] }
