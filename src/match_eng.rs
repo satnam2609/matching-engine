@@ -28,8 +28,8 @@ type Book = Arc<AtomicPtr<LimitOrderBook>>;
 /// and those messages are processed by the [`LimitOrderBook`] and [`Engine`] returns
 /// those responses back to all the entities via the MultiCast connection.
 pub struct Engine {
-    pub book: Book,                          // Atomic reference of the limit order book.
-    sender: Sender<(String, Message)>,       // Channel for sending the messages to the engine.
+    pub book: Book,                    // Atomic reference of the limit order book.
+    sender: Sender<(String, Message)>, // Channel for sending the messages to the engine.
     pub request_map: Arc<DashMap<String, String>>, // Hashmap for mapping the order id with the user
 }
 
@@ -37,14 +37,17 @@ impl Engine {
     /// This method creates new instance of the [`Engine`].
     /// To handle the messages and execute the [`LimitOrderBook::best_bid`] and [`LimitOrderBook::best_ask`],
     /// it needs [`ThreadPool`] and some threads to process the messages and execute the orders.
-    pub fn new(id: i32, num_threads: usize, response_channel: Arc<Sender<(String,Response)>>) -> Engine {
+    pub fn new(
+        id: i32,
+        num_threads: usize,
+        response_channel: Arc<Sender<(String, Response)>>,
+    ) -> Engine {
         let lob = Box::into_raw(Box::new(LimitOrderBook::new(id)));
 
         let book = Arc::new(AtomicPtr::new(lob));
         let (sender, receiver) = unbounded::<(String, Message)>();
         let pool: ThreadPool = ThreadPool::new(num_threads);
         let request_map = Arc::new(DashMap::new());
-
 
         let thread_book = book.clone();
 
@@ -63,19 +66,19 @@ impl Engine {
                             order_type,
                         } => {
                             let order_id = Uuid::new_v4(); // Unique request identifier
-                            let res = lob.insert_order(order_id.to_string(),price, shares, order_type);
+                            let res =
+                                lob.insert_order(order_id.to_string(), price, shares, order_type);
                             thread_request_map_clone.insert(order_id.to_string(), msg.0.clone());
                             let _ = response_channel_clone
-                                .send((msg.0.clone(),res))
+                                .send((msg.0.clone(), res))
                                 .map_err(|e| println!("error:{e}"));
                         }
                         Message::Cancel { id } => {
-                            
                             let res = lob.remove_order(id.clone(), 0, &mut OrderStatus::CANCEL);
-                            if res.is_ok(){
+                            if res.is_ok() {
                                 thread_request_map_clone.remove(&id.clone());
                             }
-                            response_channel_clone.send((msg.0,res)).unwrap();
+                            response_channel_clone.send((msg.0, res)).unwrap();
                         }
                     });
                 }
@@ -83,15 +86,19 @@ impl Engine {
         });
 
         let thread_book = book.clone();
-        let executor_request_map=request_map.clone();
+        let executor_request_map = request_map.clone();
         thread::spawn(move || loop {
-            Executor::run(thread_book.clone(),executor_request_map.clone(), channel.clone());
+            Executor::run(
+                thread_book.clone(),
+                executor_request_map.clone(),
+                channel.clone(),
+            );
         });
 
         Engine {
             book,
             sender,
-            request_map
+            request_map,
         }
     }
 
@@ -104,7 +111,11 @@ impl Engine {
 pub struct Executor {}
 
 impl Executor {
-    pub fn run(book: Book,request_map:Arc<DashMap<String,String>> ,response_channel: Arc<Sender<(String,Response)>>) {
+    pub fn run(
+        book: Book,
+        request_map: Arc<DashMap<String, String>>,
+        response_channel: Arc<Sender<(String, Response)>>,
+    ) {
         if let Some(lob) = unsafe { book.load(Acquire).as_ref() } {
             let best_ask = &lob.best_ask;
             let best_bid = &lob.best_bid;
@@ -115,10 +126,8 @@ impl Executor {
                 let bid_order = unsafe { &*best_bid.load(Acquire) };
                 let ask_order = unsafe { &*best_ask.load(Acquire) };
 
-
-                let ask_user=request_map.get(&ask_order.id).unwrap().value().to_owned();
-                let bid_user=request_map.get(&bid_order.id).unwrap().value().to_owned();
-
+                let ask_user = request_map.get(&ask_order.id).unwrap().value().to_owned();
+                let bid_user = request_map.get(&bid_order.id).unwrap().value().to_owned();
 
                 if ask_order.price <= bid_order.price {
                     // found match
@@ -143,18 +152,19 @@ impl Executor {
                             &mut OrderStatus::FULL,
                         );
 
-                        if res.is_ok(){
+                        if res.is_ok() {
                             request_map.remove(&ask_user);
                         }
-                        response_channel.send((ask_user,res)).unwrap();
+                        response_channel.send((ask_user, res)).unwrap();
                     } else {
                         // Notify that Order Executed Partially.
                         let res = Ok(LOBResponse::Executed(
                             ask_order.id.clone(),
+                            ask_order.price,
                             shares_to_execute,
                             OrderStatus::PARTIAL,
                         ));
-                        response_channel.send((ask_user,res)).unwrap();
+                        response_channel.send((ask_user, res)).unwrap();
                     }
 
                     if bid_order.shares.load(Acquire) == 0 {
@@ -164,18 +174,19 @@ impl Executor {
                             &mut OrderStatus::FULL,
                         );
 
-                        if res.is_ok(){
+                        if res.is_ok() {
                             request_map.remove(&bid_user);
                         }
-                        response_channel.send((bid_user,res)).unwrap();
+                        response_channel.send((bid_user, res)).unwrap();
                     } else {
                         // Notify that Order Executed Partially.
                         let res = Ok(LOBResponse::Executed(
                             bid_order.id.clone(),
+                            bid_order.price,
                             shares_to_execute,
                             OrderStatus::PARTIAL,
                         ));
-                        response_channel.send((bid_user,res)).unwrap();
+                        response_channel.send((bid_user, res)).unwrap();
                     }
                 } else {
                     thread::park_timeout(Duration::from_nanos(1000));

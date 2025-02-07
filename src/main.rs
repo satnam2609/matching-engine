@@ -1,6 +1,6 @@
 pub mod match_eng;
 
-use std::sync::Arc;
+use std:: sync::Arc;
 
 use crossbeam_channel::unbounded;
 
@@ -9,24 +9,32 @@ use match_eng::*;
 use port_server::message::{Response, UserRequest};
 use tokio::net::UdpSocket;
 
-pub const ENGINE_ADDRESS: &'static str = "127.0.0.1:8080";
-pub const MULTICAST_ADDRESS: &'static str = "224.0.0.1:5000";
+use dotenv::dotenv;
 
-
-/// Matching Engine gets the messages via the UDP Connection and 
-/// this messages are sent to the Engine via channel and this method 
+/// Matching Engine gets the messages via the UDP Connection and
+/// this messages are sent to the Engine via channel and this method
 /// broadcasts all the responses back to the entites participating in
 /// the system.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let (sender, receiver) = unbounded();
-    let sock = Arc::new(UdpSocket::bind(ENGINE_ADDRESS).await?);
-    let engine = Engine::new(1, 9, Arc::new(sender));
+    dotenv().ok();
+
+    let engine_address=std::env::var("ENGINE_ADDRESS").expect("ENGINE_ADDRESS env error");
+
+    let multicast_address=std::env::var("MULTICAST_ADDRESS").expect("MULTICAST_ADDRESS env error");
     
-    println!("Matching Engine server running at {:?}...", ENGINE_ADDRESS);
+    println!(
+        "Matching Engine server running at {:?}...",
+        engine_address
+    );
+
+    
+    let (sender, receiver) = unbounded();
+    let sock = Arc::new(UdpSocket::bind(engine_address).await?);
+    let engine = Engine::new(1, 9, Arc::new(sender));
+
 
     let sock_clone = sock.clone();
-
 
     tokio::spawn(async move {
         loop {
@@ -36,24 +44,24 @@ async fn main() -> std::io::Result<()> {
                 .await
                 .expect("Failed to read from buffer...");
             let req: UserRequest = bincode::deserialize(&buf[..len]).unwrap();
-            println!("Session:{:?}",req.session);
+            println!("Session:{:?}", req.session);
             println!("Got message:{:?}", req.message);
-            let tuple=(req.session,req.message);
+            let tuple = (req.session, req.message);
             engine.send(tuple);
         }
     });
 
     for res in receiver {
-        let response=Response{
-            session:res.0,
-            res:res.1
+        let response = Response {
+            session: res.0,
+            res: res.1,
         };
 
-        println!("Response:{:?}",response);
+        println!("Response:{:?}", response);
 
         let mut serialized = bincode::serialize(&response).unwrap();
 
-        sock.send_to(&mut serialized, MULTICAST_ADDRESS)
+        sock.send_to(&mut serialized, &multicast_address)
             .await
             .expect("Failed to send response...");
     }
