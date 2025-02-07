@@ -6,7 +6,7 @@ use crossbeam_channel::unbounded;
 
 use match_eng::*;
 
-use port_server::message::Message;
+use port_server::message::{Response, UserRequest};
 use tokio::net::UdpSocket;
 
 pub const ENGINE_ADDRESS: &'static str = "127.0.0.1:8080";
@@ -22,10 +22,12 @@ async fn main() -> std::io::Result<()> {
     let (sender, receiver) = unbounded();
     let sock = Arc::new(UdpSocket::bind(ENGINE_ADDRESS).await?);
     let engine = Engine::new(1, 9, Arc::new(sender));
-
+    
     println!("Matching Engine server running at {:?}...", ENGINE_ADDRESS);
 
     let sock_clone = sock.clone();
+
+
     tokio::spawn(async move {
         loop {
             let mut buf = [0; 1024];
@@ -33,14 +35,23 @@ async fn main() -> std::io::Result<()> {
                 .recv_from(&mut buf)
                 .await
                 .expect("Failed to read from buffer...");
-            let message: Message = bincode::deserialize(&buf[..len]).unwrap();
-            println!("Got message:{:?}", message);
-            engine.send(message);
+            let req: UserRequest = bincode::deserialize(&buf[..len]).unwrap();
+            println!("Session:{:?}",req.session);
+            println!("Got message:{:?}", req.message);
+            let tuple=(req.session,req.message);
+            engine.send(tuple);
         }
     });
 
     for res in receiver {
-        let mut serialized = bincode::serialize(&res).unwrap();
+        let response=Response{
+            session:res.0,
+            res:res.1
+        };
+
+        println!("Response:{:?}",response);
+
+        let mut serialized = bincode::serialize(&response).unwrap();
 
         sock.send_to(&mut serialized, MULTICAST_ADDRESS)
             .await
