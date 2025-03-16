@@ -74,7 +74,7 @@ impl Engine {
                                 .map_err(|e| println!("error:{e}"));
                         }
                         Message::Cancel { id } => {
-                            let res = lob.remove_order(id.clone(), 0, &mut OrderStatus::CANCEL);
+                            let res = lob.remove_order(id.clone(),0.0, 0, &mut OrderStatus::CANCEL);
                             if res.is_ok() {
                                 thread_request_map_clone.remove(&id.clone());
                             }
@@ -148,6 +148,7 @@ impl Executor {
                     if ask_order.shares.load(Acquire) == 0 {
                         let res = lob.remove_order(
                             ask_order.id.clone(),
+                            ask_order.price,
                             ask_shares,
                             &mut OrderStatus::FULL,
                         );
@@ -161,8 +162,10 @@ impl Executor {
                         let res = Ok(LOBResponse::Executed(
                             ask_order.id.clone(),
                             ask_order.price,
+                            ask_order.price,
                             shares_to_execute,
                             OrderStatus::PARTIAL,
+                            ask_order.order_type
                         ));
                         response_channel.send((ask_user, res)).unwrap();
                     }
@@ -170,6 +173,7 @@ impl Executor {
                     if bid_order.shares.load(Acquire) == 0 {
                         let res = lob.remove_order(
                             bid_order.id.clone(),
+                            ask_order.price,
                             bid_shares,
                             &mut OrderStatus::FULL,
                         );
@@ -182,9 +186,11 @@ impl Executor {
                         // Notify that Order Executed Partially.
                         let res = Ok(LOBResponse::Executed(
                             bid_order.id.clone(),
+                            ask_order.price,
                             bid_order.price,
                             shares_to_execute,
                             OrderStatus::PARTIAL,
+                            bid_order.order_type
                         ));
                         response_channel.send((bid_user, res)).unwrap();
                     }
@@ -195,3 +201,4 @@ impl Executor {
         }
     }
 }
+
